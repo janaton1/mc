@@ -525,6 +525,7 @@ find_parameters (char **start_dir, ssize_t * start_dir_len,
 #endif
     const char *file_case_label = N_("Cas&e sensitive");
     const char *file_skip_hidden_label = N_("S&kip hidden");
+    const char *file_only_directories_label = N_("Only &directories");
 
     /* file content */
     const char *content_content_label = N_("Content:");
@@ -554,6 +555,7 @@ find_parameters (char **start_dir, ssize_t * start_dir_len,
         file_name_label = _(file_name_label);
         file_recurs_label = _(file_recurs_label);
         file_pattern_label = _(file_pattern_label);
+        file_only_directories_label = _(file_only_directories_label);
 #ifdef HAVE_CHARSET
         file_all_charsets_label = _(file_all_charsets_label);
 #endif
@@ -1323,9 +1325,8 @@ do_search (WDialog * h)
 
                     if (mc_lstat (tmp_vpath, &tmp_stat) == 0 && S_ISDIR (tmp_stat.st_mode))
                     {
-			is_dir = TRUE;
+						is_dir = TRUE;
                         push_directory (tmp_vpath);
-                        subdirs_left--;
                     }
                     else
                         vfs_path_free (tmp_vpath);
