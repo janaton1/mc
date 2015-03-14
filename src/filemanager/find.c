@@ -68,6 +68,10 @@
 
 #define MAX_REFRESH_INTERVAL (G_USEC_PER_SEC / 20)      /* 50 ms */
 #define MIN_REFRESH_FILE_SIZE (256 * 1024)      /* 256 KB */
+/* Size of the find window */
+#define FIND2_Y (LINES - 4)
+
+#define FIND2_X_USE (FIND2_X - 20)
 
 /*** file scope type declarations ****************************************************************/
 
@@ -96,6 +100,7 @@ typedef struct
     gboolean file_pattern;
     gboolean find_recurs;
     gboolean skip_hidden;
+    gboolean only_directories;
     gboolean file_all_charsets;
 
     /* file content options */
@@ -122,6 +127,16 @@ static int find_do_edit_file (WButton * button, int action);
 /* Parsed ignore dirs */
 static char **find_ignore_dirs = NULL;
 
+/* Size of the find parameters window */
+#ifdef HAVE_CHARSET
+static int FIND_Y = 19;
+#else
+static int FIND_Y = 18;
+#endif
+static int FIND_X = 68;
+
+static int FIND2_X = 64;
+
 /* static variables to remember find parameters */
 static WInput *in_start;        /* Start path */
 static WInput *in_name;         /* Filename */
@@ -132,6 +147,7 @@ static WCheck *file_case_sens_cbox;     /* "case sensitive" checkbox */
 static WCheck *file_pattern_cbox;       /* File name is glob or regexp */
 static WCheck *recursively_cbox;
 static WCheck *skip_hidden_cbox;
+static WCheck *only_directories_cbox;
 static WCheck *content_use_cbox;        /* Take into account the Content field */
 static WCheck *content_case_sens_cbox;  /* "case sensitive" checkbox */
 static WCheck *content_regexp_cbox;     /* "find regular expression" checkbox */
@@ -240,6 +256,7 @@ parse_ignore_dirs (const char *ignore_dirs)
         {
             /* empty entry -- skip it */
             MC_PTR_FREE (find_ignore_dirs[r]);
+            find_ignore_dirs[r] = NULL;
             continue;
         }
 
@@ -254,7 +271,10 @@ parse_ignore_dirs (const char *ignore_dirs)
         if (find_ignore_dirs[w][0] != '\0')
             w++;
         else
-            MC_PTR_FREE (find_ignore_dirs[w]);
+        {
+            MC_PTR_FREE (find_ignore_dirs[w]);;
+            find_ignore_dirs[w] = NULL;
+        }
     }
 
     if (find_ignore_dirs[0] == NULL)
@@ -283,6 +303,8 @@ find_load_options (void)
     options.find_recurs = mc_config_get_bool (mc_main_config, "FindFile", "file_find_recurs", TRUE);
     options.skip_hidden =
         mc_config_get_bool (mc_main_config, "FindFile", "file_skip_hidden", FALSE);
+    options.only_directories =
+        mc_config_get_bool (mc_main_config, "FindFile", "file_only_directories", FALSE);
     options.file_all_charsets =
         mc_config_get_bool (mc_main_config, "FindFile", "file_all_charsets", FALSE);
     options.content_use = mc_config_get_bool (mc_main_config, "FindFile", "content_use", TRUE);
@@ -301,7 +323,10 @@ find_load_options (void)
     options.ignore_dirs = mc_config_get_string (mc_main_config, "FindFile", "ignore_dirs", "");
 
     if (options.ignore_dirs[0] == '\0')
+    {
         MC_PTR_FREE (options.ignore_dirs);
+        options.ignore_dirs = NULL;
+    }
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -313,6 +338,7 @@ find_save_options (void)
     mc_config_set_bool (mc_main_config, "FindFile", "file_shell_pattern", options.file_pattern);
     mc_config_set_bool (mc_main_config, "FindFile", "file_find_recurs", options.find_recurs);
     mc_config_set_bool (mc_main_config, "FindFile", "file_skip_hidden", options.skip_hidden);
+    mc_config_set_bool (mc_main_config, "FindFile", "file_only_directories", options.only_directories);
     mc_config_set_bool (mc_main_config, "FindFile", "file_all_charsets", options.file_all_charsets);
     mc_config_set_bool (mc_main_config, "FindFile", "content_use", options.content_use);
     mc_config_set_bool (mc_main_config, "FindFile", "content_case_sens", options.content_case_sens);
@@ -642,6 +668,9 @@ find_parameters (char **start_dir, ssize_t * start_dir_len,
     /* Continue 1st column */
     recursively_cbox = check_new (y1++, x1, options.find_recurs, file_recurs_label);
     add_widget (find_dlg, recursively_cbox);
+    
+    only_directories_cbox = check_new (y1++, x1, options.only_directories, file_only_directories_label);
+    add_widget (find_dlg, only_directories_cbox);
 
     file_pattern_cbox = check_new (y1++, x1, options.file_pattern, file_pattern_label);
     add_widget (find_dlg, file_pattern_cbox);
@@ -741,6 +770,7 @@ find_parameters (char **start_dir, ssize_t * start_dir_len,
             options.file_pattern = file_pattern_cbox->state & C_BOOL;
             options.file_case_sens = file_case_sens_cbox->state & C_BOOL;
             options.skip_hidden = skip_hidden_cbox->state & C_BOOL;
+            options.only_directories = only_directories_cbox->state & C_BOOL;
             options.ignore_dirs_enable = ignore_dirs_cbox->state & C_BOOL;
             g_free (options.ignore_dirs);
             options.ignore_dirs = g_strdup (in_ignore->buffer);
@@ -1276,6 +1306,9 @@ do_search (WDialog * h)
         if (!(options.skip_hidden && (dp->d_name[0] == '.')))
         {
             gboolean search_ok;
+	    gboolean is_dir;
+
+	    is_dir = FALSE;
 
             if (options.find_recurs && (directory != NULL))
             {                   /* Can directory be NULL ? */
@@ -1289,7 +1322,11 @@ do_search (WDialog * h)
                     tmp_vpath = vfs_path_build_filename (directory, dp->d_name, (char *) NULL);
 
                     if (mc_lstat (tmp_vpath, &tmp_stat) == 0 && S_ISDIR (tmp_stat.st_mode))
+                    {
+			is_dir = TRUE;
                         push_directory (tmp_vpath);
+                        subdirs_left--;
+                    }
                     else
                         vfs_path_free (tmp_vpath);
                 }
@@ -1298,7 +1335,7 @@ do_search (WDialog * h)
             search_ok = mc_search_run (search_file_handle, dp->d_name,
                                        0, strlen (dp->d_name), &bytes_found);
 
-            if (search_ok)
+            if (search_ok && (!options.only_directories || is_dir))
             {
                 if (content_pattern == NULL)
                     find_add_match (directory, dp->d_name);
